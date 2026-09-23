@@ -1,0 +1,51 @@
+name: 仓库保活
+
+# 用途：GitHub 会自动禁用「连续 60 天无提交」仓库中的定时工作流。
+# 定时工作流自身的运行不算仓库活动，只有提交才算，
+# 因此本工作流定期产生一次提交，重置计时器，避免分析任务被停用。
+
+on:
+  schedule:
+    # 每月 1 日、15 日 UTC 00:00（间隔 30 天以内，远低于 60 天阈值）
+    - cron: '0 0 1,15 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v5
+
+      - name: 更新保活时间戳
+        run: |
+          mkdir -p .github
+          cat > .github/KEEPALIVE.md << EOF
+          # Repository Keepalive
+
+          本文件由「仓库保活」工作流定期更新。
+
+          原因：GitHub 会自动禁用连续 60 天无提交的仓库中的定时工作流。
+          定时工作流自身的运行**不**算仓库活动，只有提交才算，
+          所以需要本工作流定期产生一次提交来重置计时器。
+
+          **最后更新：** $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+          **工作流运行：** #${{ github.run_number }}
+          **触发方式：** ${{ github.event_name }}
+          EOF
+
+      - name: 提交并推送
+        run: |
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add .github/KEEPALIVE.md
+          if git diff --staged --quiet; then
+            echo "无变更，跳过提交"
+          else
+            git commit -m "chore: keepalive at $(date -u +'%Y-%m-%d')"
+            git push
+            echo "保活提交完成"
+          fi
