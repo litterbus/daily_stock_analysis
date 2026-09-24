@@ -9,10 +9,127 @@ import pytest
 from unittest.mock import patch
 
 from src.services.stock_code_utils import (
+    build_daily_code_candidates,
     is_code_like,
     normalize_code,
+    resolve_daily_stock_identity,
     resolve_index_stock_code_for_analysis,
 )
+
+
+class TestBuildDailyCodeCandidates:
+    @pytest.mark.parametrize(
+        "code",
+        ["600519.SZ", "000001.SH", "920748.SH", "SH920748", "600519.HK"],
+    )
+    def test_rejects_conflicting_explicit_exchange_before_any_candidate(self, code):
+        assert build_daily_code_candidates(code) == []
+
+    @pytest.mark.parametrize(
+        ("code", "required_candidates"),
+        [
+            (
+                "600519.SH",
+                {
+                    "600519.SH",
+                    "600519",
+                    "SH600519",
+                    "SH.600519",
+                    "SS600519",
+                },
+            ),
+            ("600519", {"600519", "600519.SH"}),
+            ("000001.SZ", {"000001.SZ", "000001"}),
+            ("920748", {"920748", "BJ920748", "920748.BJ"}),
+            ("1810", {"1810", "01810", "HK01810", "01810.HK"}),
+            ("01810", {"1810", "01810", "HK01810", "01810.HK"}),
+            ("1810.HK", {"1810", "1810.HK", "01810", "HK01810", "01810.HK"}),
+            ("HK.01810", {"1810", "HK.01810", "01810", "HK01810", "01810.HK"}),
+            ("AAPL", {"AAPL", "AAPL.US"}),
+            ("AAPL.US", {"AAPL.US", "AAPL"}),
+            ("NASDAQ", {"NASDAQ"}),
+            ("^GSPC", {"^GSPC"}),
+        ],
+    )
+    def test_preserves_valid_explicit_and_legacy_bare_codes(
+        self,
+        code,
+        required_candidates,
+    ):
+        assert set(build_daily_code_candidates(code)) >= required_candidates
+
+    @pytest.mark.parametrize(
+        ("code", "normalized_code", "market", "refill_code"),
+        [
+            ("600519.SH", "600519", "cn", "600519"),
+            ("1810", "01810", "hk", "HK01810"),
+            ("HK.01810", "01810", "hk", "HK01810"),
+            ("AAPL.US", "AAPL", "us", "AAPL"),
+            ("BRK.B", "BRK.B", "us", "BRK.B"),
+            ("NASDAQ", "NASDAQ", "us", "NASDAQ"),
+            ("^GSPC", "^GSPC", "us", "^GSPC"),
+            ("7203.T", "7203.T", "jp", "7203.T"),
+        ],
+    )
+    def test_one_identity_drives_candidates_market_and_refill(
+        self,
+        code,
+        normalized_code,
+        market,
+        refill_code,
+    ):
+        identity = resolve_daily_stock_identity(code)
+
+        assert identity is not None
+        assert identity.normalized_code == normalized_code
+        assert identity.market == market
+        assert identity.refill_code == refill_code
+        assert code in identity.code_candidates
+        assert refill_code in identity.code_candidates
+
+    def test_kr_suffix_adds_only_its_legacy_bare_candidate(self):
+        identity = resolve_daily_stock_identity("005930.KS")
+
+        assert identity is not None
+        assert identity.market == "kr"
+        assert identity.code_candidates == ("005930.KS", "005930")
+
+    def test_bare_taiwan_code_uses_explicit_market_hint(self):
+        identity = resolve_daily_stock_identity("005930", market_hint="tw")
+
+        assert identity is not None
+        assert identity.normalized_code == "005930"
+        assert identity.market == "tw"
+        assert identity.refill_code == ""
+        assert identity.code_candidates == ("005930",)
+
+    def test_cross_market_bare_code_without_hint_fails_closed(self):
+        assert resolve_daily_stock_identity("8035") is None
+
+    def test_cross_market_suffix_code_does_not_add_ambiguous_bare_alias(self):
+        identity = resolve_daily_stock_identity("8035.T")
+
+        assert identity is not None
+        assert identity.market == "jp"
+        assert identity.code_candidates == ("8035.T",)
+
+    def test_cross_market_hk_code_does_not_add_ambiguous_bare_alias(self):
+        identity = resolve_daily_stock_identity("08035.HK")
+
+        assert identity is not None
+        assert identity.market == "hk"
+        assert "8035" not in identity.code_candidates
+        assert "08035.HK" in identity.code_candidates
+        assert "8035.HK" in identity.code_candidates
+
+    def test_trusted_legacy_jp_identity_keeps_its_raw_bare_code(self):
+        identity = resolve_daily_stock_identity("8035", market_hint="jp")
+
+        assert identity is not None
+        assert identity.market == "jp"
+        assert identity.code_candidates[0] == "8035"
+        assert "8035" in identity.code_candidates
+        assert "8035.T" in identity.code_candidates
 
 
 class TestIsCodeLike:
@@ -250,3 +367,36 @@ class TestResolveIndexStockCodeForAnalysis:
         with patch("src.data.stock_index_loader.resolve_index_stock_code", return_value=None):
             assert resolve_index_stock_code_for_analysis("005930") == "005930"
             assert resolve_index_stock_code_for_analysis("AAPL") == "AAPL"
+
+    # ------------------------------------------------------------------
+    # PR #2267 review remediation — registered CSI explicit identity
+    # convergence (resolver / task dedupe key / history candidates).
+    # ------------------------------------------------------------------
+
+    @pytest.mark.parametrize(
+        "code",
+        ["csi930955", "930955.CSI", "CSI930955", "  csi930955  ", "930955.csi"],
+    )
+    def test_registered_csi_forms_converge_to_parser_canonical(self, code):
+        """All registered CSI explicit forms resolve to the parser canonical
+        ``csi930955`` so the resolver and task dedupe key do not split the same
+        index into distinct keys."""
+        assert resolve_index_stock_code_for_analysis(code) == "csi930955"
+
+    @pytest.mark.parametrize(
+        "code,expected",
+        [
+            ("csi930956", "CSI930956"),
+            ("930956.CSI", "930956.CSI"),
+            ("CSI930956", "CSI930956"),
+        ],
+    )
+    def test_unregistered_csi_forms_keep_existing_behavior(self, code, expected):
+        """An unregistered CSI form is NOT converged; it keeps its existing
+        canonicalized (uppercased) degradation so it never becomes a guessed
+        index identity."""
+        assert resolve_index_stock_code_for_analysis(code) == expected
+
+    def test_bare_csi_base_remains_stock(self):
+        """A bare numeric base of a CSI index stays a stock (no convergence)."""
+        assert resolve_index_stock_code_for_analysis("930955") == "930955"

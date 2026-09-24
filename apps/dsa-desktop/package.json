@@ -21,6 +21,7 @@
     "directories": {
       "output": "dist"
     },
+    "afterPack": "scripts/afterPackMacos.js",
     "files": [
       "main.js",
       "preload.js",
@@ -54,7 +55,13 @@
       "include": "installer.nsh"
     },
     "mac": {
+      "identity": null,
+      "hardenedRuntime": false,
       "target": "dmg"
     }
+  },
+  "overrides": {
+    "builder-util-runtime": "9.7.0",
+    "js-yaml": "4.3.1"
   }
 }

@@ -934,6 +934,24 @@
             "description": "Optional market phase filter"
           },
           {
+            "name": "decision_profile",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional decision profile filter: conservative/balanced/aggressive/unknown",
+              "title": "Decision Profile"
+            },
+            "description": "Optional decision profile filter: conservative/balanced/aggressive/unknown"
+          },
+          {
             "name": "source_type",
             "in": "query",
             "required": false,
@@ -1395,7 +1413,7 @@
           "DecisionSignals"
         ],
         "summary": "更新决策信号状态",
-        "description": "只更新合法状态和可选 metadata；传入 metadata 时按整包替换保存。expired/invalidated/closed/archived 等 terminal 状态不能直接 PATCH 回 active。",
+        "description": "只更新合法状态和可选 metadata；省略 metadata 时保留原值，null 时清空，object 时按整包替换并保持正式 decision_profile 身份。expired/invalidated/closed/archived 等 terminal 状态不能直接 PATCH 回 active。",
         "operationId": "updateDecisionSignalStatus",
         "security": [
           {
@@ -2510,6 +2528,18 @@
               "title": "Cost Method"
             },
             "description": "Cost method: fifo or avg"
+          },
+          {
+            "name": "include_realtime",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Whether today's risk snapshot should try realtime quotes before historical close fallback",
+              "default": true,
+              "title": "Include Realtime"
+            },
+            "description": "Whether today's risk snapshot should try realtime quotes before historical close fallback"
           }
         ],
         "responses": {
@@ -2542,6 +2572,234 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/decision-signals/reassess": {
+      "post": {
+        "tags": [
+          "DecisionSignals"
+        ],
+        "summary": "重评估决策风格并可选保存",
+        "description": "基于 source_report_id 对应的持久化历史报告快照重新计算 decision_profile 信号；persist=false 返回只读 preview，persist=true 将通过 guardrail 的服务端结果写入 DecisionSignal。",
+        "operationId": "reassessDecisionSignalPreview",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionSignalReassessRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionSignalReassessResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "未登录或管理员会话无效（ADMIN_AUTH_ENABLED=true 时）",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "历史报告不适用或持久化被风控阻断",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecisionSignalReassessErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "来源历史报告不存在",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "请求体校验失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "重评估失败",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "AdminSessionCookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/data/overview": {
+      "get": {
+        "tags": [
+          "Data"
+        ],
+        "summary": "Get data capability overview",
+        "description": "Return provider capabilities, dataset quality, and source priority without exposing secrets.",
+        "operationId": "get_data_overview_api_v1_data_overview_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataCapabilityOverviewResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/data/capabilities": {
+      "get": {
+        "tags": [
+          "Data"
+        ],
+        "summary": "Get data provider capabilities",
+        "description": "Alias of /data/overview for clients that only need capability metadata.",
+        "operationId": "get_data_capabilities_api_v1_data_capabilities_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataCapabilityOverviewResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Internal Server Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stocks/{stock_code}/profile": {
+      "get": {
+        "tags": [
+          "Stocks"
+        ],
+        "summary": "获取个股研究聚合档案",
+        "description": "按独立质量状态聚合行情、历史、研究产物、资讯、持仓关系和监控规则。",
+        "operationId": "get_stock_profile_api_v1_stocks__stock_code__profile_get",
+        "parameters": [
+          {
+            "name": "stock_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Stock Code"
+            }
+          },
+          {
+            "name": "history_days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 365,
+              "minimum": 1,
+              "description": "日线历史天数",
+              "default": 60,
+              "title": "History Days"
+            },
+            "description": "日线历史天数"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StockProfileResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "股票代码无效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务器错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
           },
           "422": {
             "description": "Validation Error",
@@ -3097,6 +3355,10 @@
             "description": "建议动作展示标签",
             "nullable": true
           },
+          "model_used": {
+            "type": "string",
+            "description": "历史记录中展示的模型快照，仅用于展示与排障，不影响 provider/model/base URL 运行时路由"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -3134,7 +3396,7 @@
               },
               "model_used": {
                 "type": "string",
-                "description": "分析使用的 LLM 模型（完整名，如 gemini/gemini-2.0-flash）"
+                "description": "历史快照中的模型名称，仅供展示，不参与运行时 provider/model/base URL 路由、清理或迁移"
               }
             }
           },
@@ -3228,14 +3490,575 @@
               "context_snapshot": {
                 "type": "object",
                 "description": "分析时上下文快照（JSON）"
+              },
+              "market_structure": {
+                "type": "object",
+                "description": "市场结构上下文（题材主线与个股市场位置信息，JSON）"
               }
             }
+          },
+          "structured_report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchArtifact"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "结构化研究产物，供看板、个股研究页、监控和 Copilot 复用"
           }
         },
         "required": [
           "meta",
           "summary"
         ]
+      },
+      "ResearchArtifact": {
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "research-artifact-v1",
+            "title": "Schema Version",
+            "default": "research-artifact-v1"
+          },
+          "artifact_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Artifact Id"
+          },
+          "source_report_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Report Id"
+          },
+          "source_query_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Query Id"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "subject": {
+            "$ref": "#/components/schemas/ResearchSubject"
+          },
+          "thesis": {
+            "$ref": "#/components/schemas/ResearchThesis"
+          },
+          "evidence": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchEvidenceItem"
+            },
+            "type": "array",
+            "title": "Evidence"
+          },
+          "invalidation_conditions": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchInvalidationCondition"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Invalidation Conditions"
+          },
+          "next_actions": {
+            "items": {
+              "$ref": "#/components/schemas/ResearchNextAction"
+            },
+            "type": "array",
+            "title": "Next Actions"
+          },
+          "data_quality": {
+            "$ref": "#/components/schemas/ResearchDataQuality"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "artifact_id",
+          "subject",
+          "thesis",
+          "invalidation_conditions"
+        ],
+        "title": "ResearchArtifact",
+        "description": "Structured report artifact for dashboard, stock detail, monitor and copilot reuse."
+      },
+      "ResearchDataQuality": {
+        "properties": {
+          "level": {
+            "type": "string",
+            "enum": [
+              "good",
+              "usable",
+              "limited",
+              "poor",
+              "unknown"
+            ],
+            "title": "Level",
+            "default": "unknown"
+          },
+          "overall_score": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overall Score"
+          },
+          "source_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Source Count",
+            "default": 0
+          },
+          "stale_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Stale Count",
+            "default": 0
+          },
+          "missing_blocks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Blocks"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Limitations"
+          }
+        },
+        "type": "object",
+        "title": "ResearchDataQuality",
+        "description": "Low-sensitive quality summary for the artifact inputs."
+      },
+      "ResearchEvidenceItem": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Id"
+          },
+          "source_type": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Source Type"
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Title"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "freshness": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "stale",
+              "unknown"
+            ],
+            "title": "Freshness",
+            "default": "unknown"
+          },
+          "quality_level": {
+            "type": "string",
+            "enum": [
+              "good",
+              "usable",
+              "limited",
+              "poor",
+              "unknown"
+            ],
+            "title": "Quality Level",
+            "default": "unknown"
+          },
+          "as_of": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Of"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "source_type",
+          "title"
+        ],
+        "title": "ResearchEvidenceItem",
+        "description": "One evidence item with freshness and quality status."
+      },
+      "ResearchInvalidationCondition": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Id"
+          },
+          "category": {
+            "type": "string",
+            "enum": [
+              "price",
+              "volume",
+              "evidence",
+              "market",
+              "time",
+              "data_quality",
+              "manual"
+            ],
+            "title": "Category"
+          },
+          "description": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Description"
+          },
+          "trigger": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trigger"
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "watch",
+              "warning",
+              "critical"
+            ],
+            "title": "Severity",
+            "default": "warning"
+          },
+          "metric": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metric"
+          },
+          "threshold": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Threshold"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "category",
+          "description"
+        ],
+        "title": "ResearchInvalidationCondition",
+        "description": "Condition that should invalidate or force reassessment of the thesis."
+      },
+      "ResearchNextAction": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Action"
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Label"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "due_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Due At"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action",
+          "label"
+        ],
+        "title": "ResearchNextAction",
+        "description": "Suggested next action for a human or workflow."
+      },
+      "ResearchSubject": {
+        "properties": {
+          "stock_code": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Stock Code"
+          },
+          "stock_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stock Name"
+          },
+          "market": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market"
+          },
+          "entity_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entity Ref",
+            "description": "Optional EntityLink ref when available"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stock_code"
+        ],
+        "title": "ResearchSubject",
+        "description": "The entity being researched."
+      },
+      "ResearchThesis": {
+        "properties": {
+          "direction": {
+            "type": "string",
+            "enum": [
+              "bullish",
+              "bearish",
+              "neutral",
+              "unknown"
+            ],
+            "title": "Direction",
+            "default": "unknown"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "description": "Concise thesis statement",
+            "default": ""
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score",
+            "description": "Original sentiment score when available"
+          },
+          "horizon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Horizon"
+          },
+          "action": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "buy",
+                  "add",
+                  "hold",
+                  "reduce",
+                  "sell",
+                  "watch",
+                  "avoid",
+                  "alert"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action"
+          },
+          "action_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Label"
+          },
+          "reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Reasons"
+          },
+          "risks": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Risks"
+          }
+        },
+        "type": "object",
+        "title": "ResearchThesis",
+        "description": "Structured investment thesis extracted from a report."
       },
       "StockQuote": {
         "type": "object",
@@ -3842,6 +4665,16 @@
             "maxLength": 64,
             "title": "Trace Id"
           },
+          "decision_profile": {
+            "type": "string",
+            "enum": [
+              "conservative",
+              "balanced",
+              "aggressive"
+            ],
+            "title": "Decision Profile",
+            "description": "Optional decision profile. Omit to use server-side default/fallback; explicit null is rejected."
+          },
           "market_phase": {
             "anyOf": [
               {
@@ -4108,7 +4941,8 @@
                 "type": "null"
               }
             ],
-            "title": "Metadata"
+            "title": "Metadata",
+            "description": "Optional metadata object. Omitted or null values are treated as absent."
           },
           "report_language": {
             "anyOf": [
@@ -4116,7 +4950,8 @@
                 "type": "string",
                 "enum": [
                   "zh",
-                  "en"
+                  "en",
+                  "ko"
                 ]
               },
               {
@@ -4159,7 +4994,8 @@
                 "type": "null"
               }
             ],
-            "title": "Metadata"
+            "title": "Metadata",
+            "description": "Optional replacement metadata. Omit to preserve the stored value; null clears it; an object replaces it while preserving the formal decision_profile identity."
           }
         },
         "type": "object",
@@ -4229,6 +5065,22 @@
               }
             ],
             "title": "Trace Id"
+          },
+          "decision_profile": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "conservative",
+                  "balanced",
+                  "aggressive"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decision Profile"
           },
           "market_phase": {
             "anyOf": [
@@ -5962,6 +6814,9 @@
             },
             "type": "object",
             "title": "Breakdowns"
+          },
+          "profile_calibration": {
+            "$ref": "#/components/schemas/DecisionSignalProfileCalibration"
           }
         },
         "type": "object",
@@ -5972,9 +6827,181 @@
           "unable",
           "hit",
           "miss",
-          "neutral"
+          "neutral",
+          "profile_calibration"
         ],
         "title": "DecisionSignalOutcomeStatsResponse"
+      },
+      "DecisionSignalProfileCalibration": {
+        "properties": {
+          "minimum_completed_sample_size": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Minimum Completed Sample Size"
+          },
+          "breakdowns": {
+            "$ref": "#/components/schemas/DecisionSignalProfileCalibrationBreakdowns"
+          }
+        },
+        "type": "object",
+        "required": [
+          "minimum_completed_sample_size",
+          "breakdowns"
+        ],
+        "title": "DecisionSignalProfileCalibration"
+      },
+      "DecisionSignalProfileCalibrationBreakdowns": {
+        "properties": {
+          "decision_profile": {
+            "items": {
+              "$ref": "#/components/schemas/DecisionSignalProfileCalibrationBucket"
+            },
+            "type": "array",
+            "title": "Decision Profile"
+          },
+          "decision_profile_action": {
+            "items": {
+              "$ref": "#/components/schemas/DecisionSignalProfileCalibrationBucket"
+            },
+            "type": "array",
+            "title": "Decision Profile Action"
+          },
+          "decision_profile_horizon": {
+            "items": {
+              "$ref": "#/components/schemas/DecisionSignalProfileCalibrationBucket"
+            },
+            "type": "array",
+            "title": "Decision Profile Horizon"
+          },
+          "decision_profile_market_phase": {
+            "items": {
+              "$ref": "#/components/schemas/DecisionSignalProfileCalibrationBucket"
+            },
+            "type": "array",
+            "title": "Decision Profile Market Phase"
+          },
+          "decision_profile_data_quality_level": {
+            "items": {
+              "$ref": "#/components/schemas/DecisionSignalProfileCalibrationBucket"
+            },
+            "type": "array",
+            "title": "Decision Profile Data Quality Level"
+          },
+          "profile_source": {
+            "items": {
+              "$ref": "#/components/schemas/DecisionSignalProfileCalibrationBucket"
+            },
+            "type": "array",
+            "title": "Profile Source"
+          }
+        },
+        "type": "object",
+        "title": "DecisionSignalProfileCalibrationBreakdowns"
+      },
+      "DecisionSignalProfileCalibrationBucket": {
+        "properties": {
+          "dimensions": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Dimensions"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "completed": {
+            "type": "integer",
+            "title": "Completed"
+          },
+          "unable": {
+            "type": "integer",
+            "title": "Unable"
+          },
+          "hit": {
+            "type": "integer",
+            "title": "Hit"
+          },
+          "miss": {
+            "type": "integer",
+            "title": "Miss"
+          },
+          "neutral": {
+            "type": "integer",
+            "title": "Neutral"
+          },
+          "sample_sufficient": {
+            "type": "boolean",
+            "title": "Sample Sufficient"
+          },
+          "hit_rate_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hit Rate Pct"
+          },
+          "avg_stock_return_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Stock Return Pct"
+          },
+          "miss_rate_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Miss Rate Pct"
+          },
+          "unable_rate_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unable Rate Pct"
+          },
+          "max_adverse_excursion_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Adverse Excursion Pct"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total",
+          "completed",
+          "unable",
+          "hit",
+          "miss",
+          "neutral",
+          "sample_sufficient"
+        ],
+        "title": "DecisionSignalProfileCalibrationBucket"
       },
       "AlertTriggerItem": {
         "properties": {
@@ -6797,6 +7824,1250 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "DecisionSignalReassessRequest": {
+        "properties": {
+          "source_report_id": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Source Report Id"
+          },
+          "decision_profile": {
+            "type": "string",
+            "enum": [
+              "conservative",
+              "balanced",
+              "aggressive"
+            ],
+            "title": "Decision Profile"
+          },
+          "persist": {
+            "type": "boolean",
+            "title": "Persist",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source_report_id",
+          "decision_profile"
+        ],
+        "title": "DecisionSignalReassessRequest"
+      },
+      "DecisionSignalReassessResponse": {
+        "properties": {
+          "preview": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DecisionSignalPreview"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "item": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DecisionSignalItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "created": {
+            "type": "boolean",
+            "title": "Created",
+            "default": false
+          },
+          "persist_status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "created",
+                  "existing",
+                  "refreshed"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Persist Status"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/DecisionSignalWarning"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "blocked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Reason"
+          }
+        },
+        "type": "object",
+        "title": "DecisionSignalReassessResponse"
+      },
+      "DecisionSignalReassessErrorResponse": {
+        "properties": {
+          "error": {
+            "type": "string",
+            "enum": [
+              "unsupported_report_type",
+              "unsupported_report_snapshot",
+              "guardrail_blocked"
+            ],
+            "title": "Error"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "blocked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Reason"
+          },
+          "warnings": {
+            "items": {
+              "$ref": "#/components/schemas/DecisionSignalWarning"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "error",
+          "message"
+        ],
+        "title": "DecisionSignalReassessErrorResponse"
+      },
+      "DecisionSignalWarning": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "title": "DecisionSignalWarning"
+      },
+      "DecisionSignalPreview": {
+        "properties": {
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Score"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "horizon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Horizon"
+          },
+          "entry_low": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry Low"
+          },
+          "entry_high": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Entry High"
+          },
+          "stop_loss": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Loss"
+          },
+          "target_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Price"
+          },
+          "invalidation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invalidation"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "risk_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Risk Summary"
+          },
+          "watch_conditions": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Watch Conditions"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action",
+          "metadata"
+        ],
+        "title": "DecisionSignalPreview"
+      },
+      "DataCapabilityOverviewResponse": {
+        "properties": {
+          "as_of": {
+            "type": "string",
+            "title": "As Of"
+          },
+          "providers": {
+            "items": {
+              "$ref": "#/components/schemas/DataProviderCapability"
+            },
+            "type": "array",
+            "title": "Providers"
+          },
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/DataDatasetQuality"
+            },
+            "type": "array",
+            "title": "Datasets"
+          },
+          "priorities": {
+            "items": {
+              "$ref": "#/components/schemas/DataPriorityView"
+            },
+            "type": "array",
+            "title": "Priorities"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "as_of"
+        ],
+        "title": "DataCapabilityOverviewResponse",
+        "description": "Read-only data capability and dataset quality overview."
+      },
+      "DataDatasetQuality": {
+        "properties": {
+          "dataset": {
+            "type": "string",
+            "title": "Dataset",
+            "description": "Stable dataset identifier"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded",
+              "partial",
+              "unconfigured",
+              "unavailable",
+              "unknown",
+              "stale"
+            ],
+            "title": "Status",
+            "description": "Current quality status"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source",
+            "description": "Selected source token when known"
+          },
+          "stale": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stale",
+            "description": "Whether the data is known stale"
+          },
+          "last_success": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success",
+            "description": "Last successful load timestamp"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error",
+            "description": "Last non-sensitive error summary"
+          },
+          "fallback_from": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Fallback From",
+            "description": "Earlier priority sources skipped before selected source"
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage",
+            "description": "Optional dataset coverage summary"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "description": "Stable warning codes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dataset",
+          "status"
+        ],
+        "title": "DataDatasetQuality",
+        "description": "Dataset-level quality view consumed by dashboards and data center."
+      },
+      "DataPriorityView": {
+        "properties": {
+          "scenario": {
+            "type": "string",
+            "title": "Scenario",
+            "description": "Stable scenario identifier"
+          },
+          "providers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Providers",
+            "description": "Configured provider/source tokens"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Where this priority list comes from",
+            "default": ""
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "description": "Stable warning codes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scenario"
+        ],
+        "title": "DataPriorityView",
+        "description": "Configured provider order for one usage scenario."
+      },
+      "DataProviderCapability": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Stable provider token"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Human-readable provider name",
+            "default": ""
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Whether the provider is enabled for runtime routing"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured",
+            "description": "Whether required configuration is present"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "partial",
+              "unconfigured",
+              "unavailable",
+              "unknown"
+            ],
+            "title": "Status",
+            "description": "Configuration/runtime availability summary"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority",
+            "description": "Runtime fetcher priority when available"
+          },
+          "markets": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Markets",
+            "description": "Supported markets"
+          },
+          "datasets": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Datasets",
+            "description": "Supported dataset identifiers"
+          },
+          "dataset_markets": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "type": "object",
+            "title": "Dataset Markets",
+            "description": "Exact supported markets for each dataset; consumers must not infer a markets × datasets cross-product"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings",
+            "description": "Stable warning codes"
+          },
+          "last_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error",
+            "description": "Last known non-sensitive error summary"
+          },
+          "cooldown": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cooldown",
+            "description": "Whether the provider is currently in cooldown"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "enabled",
+          "configured",
+          "status"
+        ],
+        "title": "DataProviderCapability",
+        "description": "Visible capability metadata for one data provider."
+      },
+      "StockProfileResearchBlock": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "partial",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "data": {
+            "$ref": "#/components/schemas/StockProfileResearchData"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Limitations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "StockProfileResearchBlock"
+      },
+      "StockProfileResearchData": {
+        "properties": {
+          "latest_report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HistoryItem"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "recent_reports": {
+            "items": {
+              "$ref": "#/components/schemas/HistoryItem"
+            },
+            "type": "array",
+            "title": "Recent Reports"
+          },
+          "structured_report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ResearchArtifact"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "StockProfileResearchData"
+      },
+      "StockProfileHistoryBlock": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "partial",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "period": {
+            "type": "string",
+            "const": "daily",
+            "title": "Period",
+            "default": "daily"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/KLineData"
+            },
+            "type": "array",
+            "title": "Data"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Limitations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "StockProfileHistoryBlock"
+      },
+      "KLineData": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date",
+            "description": "日期"
+          },
+          "open": {
+            "type": "number",
+            "title": "Open",
+            "description": "开盘价"
+          },
+          "high": {
+            "type": "number",
+            "title": "High",
+            "description": "最高价"
+          },
+          "low": {
+            "type": "number",
+            "title": "Low",
+            "description": "最低价"
+          },
+          "close": {
+            "type": "number",
+            "title": "Close",
+            "description": "收盘价"
+          },
+          "volume": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Volume",
+            "description": "成交量"
+          },
+          "amount": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount",
+            "description": "成交额"
+          },
+          "change_percent": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Change Percent",
+            "description": "涨跌幅 (%)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "open",
+          "high",
+          "low",
+          "close"
+        ],
+        "title": "KLineData",
+        "description": "K 线数据点",
+        "example": {
+          "amount": 18000000000,
+          "change_percent": 0.84,
+          "close": 1800.0,
+          "date": "2024-01-01",
+          "high": 1810.0,
+          "low": 1780.0,
+          "open": 1785.0,
+          "volume": 10000000
+        }
+      },
+      "ResearchResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "sources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "token_usage": {
+            "type": "integer",
+            "title": "Token Usage",
+            "default": 0
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "content"
+        ],
+        "title": "ResearchResponse"
+      },
+      "StockProfilePortfolioBlock": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "partial",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "data": {
+            "$ref": "#/components/schemas/StockProfilePortfolioRelation"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Limitations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "StockProfilePortfolioBlock"
+      },
+      "StockProfilePortfolioRelation": {
+        "properties": {
+          "held": {
+            "type": "boolean",
+            "title": "Held",
+            "default": false
+          },
+          "matched_markets": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Matched Markets"
+          }
+        },
+        "type": "object",
+        "title": "StockProfilePortfolioRelation"
+      },
+      "StockProfileEvidenceQuality": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "partial",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "blocks": {
+            "additionalProperties": {
+              "type": "string",
+              "enum": [
+                "fresh",
+                "partial",
+                "unavailable"
+              ]
+            },
+            "type": "object",
+            "title": "Blocks"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Limitations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "StockProfileEvidenceQuality"
+      },
+      "ResearchRequest": {
+        "properties": {
+          "question": {
+            "type": "string",
+            "title": "Question"
+          },
+          "stock_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stock Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "question"
+        ],
+        "title": "ResearchRequest"
+      },
+      "StockProfileMonitorBlock": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "partial",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "data": {
+            "$ref": "#/components/schemas/StockProfileMonitorData"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Limitations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "StockProfileMonitorBlock"
+      },
+      "StockProfileMonitorData": {
+        "properties": {
+          "total_rule_count": {
+            "type": "integer",
+            "title": "Total Rule Count",
+            "default": 0
+          },
+          "enabled_rule_count": {
+            "type": "integer",
+            "title": "Enabled Rule Count",
+            "default": 0
+          },
+          "rule_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Rule Ids"
+          }
+        },
+        "type": "object",
+        "title": "StockProfileMonitorData"
+      },
+      "StockProfileIntelligenceBlock": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "partial",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IntelligenceItem"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Limitations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "StockProfileIntelligenceBlock"
+      },
+      "IntelligenceItem": {
+        "properties": {
+          "id": {
+            "type": "integer",
+            "title": "Id"
+          },
+          "source_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Id"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "source_type": {
+            "type": "string",
+            "title": "Source Type"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "url": {
+            "type": "string",
+            "title": "Url"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "fetched_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetched At"
+          },
+          "scope_type": {
+            "type": "string",
+            "title": "Scope Type"
+          },
+          "scope_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scope Value"
+          },
+          "market": {
+            "type": "string",
+            "title": "Market"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "source_type",
+          "title",
+          "url",
+          "scope_type",
+          "market"
+        ],
+        "title": "IntelligenceItem"
+      },
+      "StockProfileResponse": {
+        "properties": {
+          "requested_code": {
+            "type": "string",
+            "title": "Requested Code"
+          },
+          "canonical_code": {
+            "type": "string",
+            "title": "Canonical Code"
+          },
+          "market": {
+            "type": "string",
+            "enum": [
+              "cn",
+              "hk",
+              "us",
+              "jp",
+              "kr",
+              "tw"
+            ],
+            "title": "Market"
+          },
+          "as_of": {
+            "type": "string",
+            "title": "As Of"
+          },
+          "quote": {
+            "$ref": "#/components/schemas/StockProfileQuoteBlock"
+          },
+          "history": {
+            "$ref": "#/components/schemas/StockProfileHistoryBlock"
+          },
+          "research": {
+            "$ref": "#/components/schemas/StockProfileResearchBlock"
+          },
+          "intelligence": {
+            "$ref": "#/components/schemas/StockProfileIntelligenceBlock"
+          },
+          "portfolio": {
+            "$ref": "#/components/schemas/StockProfilePortfolioBlock"
+          },
+          "monitors": {
+            "$ref": "#/components/schemas/StockProfileMonitorBlock"
+          },
+          "evidence_quality": {
+            "$ref": "#/components/schemas/StockProfileEvidenceQuality"
+          }
+        },
+        "type": "object",
+        "required": [
+          "requested_code",
+          "canonical_code",
+          "market",
+          "as_of",
+          "quote",
+          "history",
+          "research",
+          "intelligence",
+          "portfolio",
+          "monitors",
+          "evidence_quality"
+        ],
+        "title": "StockProfileResponse"
+      },
+      "StockProfileQuoteBlock": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "fresh",
+              "partial",
+              "unavailable"
+            ],
+            "title": "Status"
+          },
+          "data": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StockQuote"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Limitations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "StockProfileQuoteBlock"
       }
     },
     "securitySchemes": {

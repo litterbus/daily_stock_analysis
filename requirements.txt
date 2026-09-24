@@ -22,8 +22,8 @@ longbridge==0.2.74; platform_system == "Linux" and python_version < "3.12"
 # Priority 5: Longbridge OpenAPI SDK with OAuth support.
 longbridge>=4.0.5,<5; platform_system != "Linux" or python_version >= "3.12"
 tickflow>=0.1.24           # TickFlow official SDK; 0.1.24 verified for klines/get batch quotes/universes
-# Built-in optional AlphaSift screening engine
-git+https://github.com/ZhuLinsen/alphasift.git@0a7b9cd59e81718f851890535241bc105d4ddc64#egg=alphasift
+futu-api==10.8.6808        # Futu OpenAPI SDK for read-only --portfolio futu holdings import
+# The screening engine is maintained in src/services/screening.
 
 # Feishu
 lark-oapi>=1.0.0             # Feishu API
@@ -34,10 +34,11 @@ pypinyin>=0.50.0            # Name-to-code resolver (pinyin matching)
 openpyxl>=3.1.0             # Excel (.xlsx) parsing for import
 numpy>=1.24.0               # Numeric computing
 json-repair>=0.55.1         # JSON repair
+orjson>=3.10,<4             # LiteLLM runtime JSON dependency; explicitly bundled in desktop builds
 
 # AI analysis
 # Keep the historical minimum version while excluding quarantined builds and avoiding future major breaks.
-litellm>=1.80.10,!=1.82.7,!=1.82.8,<2.0.0   # Unified LLM client (Gemini/Anthropic/OpenAI/DeepSeek etc.)
+litellm>=1.80.10,!=1.82.7,!=1.82.8,<1.99.0   # Unified LLM client (Gemini/Anthropic/OpenAI/DeepSeek etc.)
 tiktoken>=0.8.0,<0.12.0    # BPE tokenizer for LLM token counting (pin <0.12 to avoid plugin registration issues, #537)
 openai>=1.0.0               # OpenAI SDK (transitive dependency of litellm, kept explicit)
 PyYAML>=6.0                 # YAML parser for LITELLM_CONFIG support

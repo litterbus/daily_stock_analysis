@@ -114,10 +114,14 @@ const toTaskInfo = (data: Record<string, unknown>): TaskInfo => {
     selectionSource: data.selection_source as string | undefined,
     analysisPhase: data.analysis_phase as TaskInfo['analysisPhase'],
     skills: Array.isArray(data.skills) ? data.skills.map(String) : undefined,
+    assetType: data.asset_type as TaskInfo['assetType'] | undefined,
   };
 
   if (typeof data.trace_id === 'string' && data.trace_id.trim()) {
     task.traceId = data.trace_id;
+  }
+  if (typeof data.region === 'string' && data.region.trim()) {
+    task.region = data.region;
   }
 
   return task;

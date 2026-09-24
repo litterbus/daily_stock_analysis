@@ -48,7 +48,7 @@ PR2 继续覆盖高频、易填错配置项：
 
 PR3 registered-field slice / 阶段性补齐：聚焦 Web 设置页中实际展示/可配置字段的 Help 补齐，包括通用配置卡片当前可见字段和 AI legacy 条件可见字段：
 
-- Agent 配置（21 字段）：Agent 模式、最大推理步数、策略列表、策略目录、自然语言路由、架构、编排器模式、超时、风险否决、Deep Research 预算/超时、记忆、策略自动权重、策略路由、问股可见对话上下文压缩、事件监控开关/间隔、告警规则 JSON。
+- Agent 配置（22 字段）：问股生成方式、Agent 模式、最大推理步数、策略列表、策略目录、自然语言路由、架构、编排器模式、超时、风险否决、Deep Research 预算/超时、记忆、策略自动权重、策略路由、问股可见对话上下文压缩、事件监控开关/间隔、告警规则 JSON。普通用户只看到新的 `AGENT_BACKEND` 选择器；旧 `AGENT_GENERATION_BACKEND` 仅保留配置兼容。
 - 回测配置（5 字段）：回测开关、评估窗口、最小记录年龄、引擎版本、中性回报带。
 - 报告配置（9 字段）：仅推送摘要、显示模型名、模板目录、渲染引擎、完整性校验/重试、历史信号对比、逐股推送、合并邮件。
 - 通知路由配置（9 字段）：报告/告警/系统错误渠道路由、去重/冷却、静默时段/时区、最低等级、每日摘要（预留）。
@@ -94,7 +94,7 @@ Issue #1512 收口后，Web 设置页只展示后端配置注册表中的正式�
 - `WEBUI_HOST`、`WEBUI_PORT`：监听地址和端口只在进程启动时绑定，保存后必须重启当前进程、Docker 容器或服务管理器才会生效。
 - `RUN_IMMEDIATELY`：非 schedule 模式启动期单次运行配置，保存后不会让已运行的 WebUI/API 进程立即触发分析。
 - Web 设置页不直接暴露 `SCHEDULE_TIME` / `SCHEDULE_TIMES` / `SCHEDULE_RUN_IMMEDIATELY` 等内部键；用户通过“定时任务”卡片维护启用状态、多个执行时间和立即执行一次。
-- `SCHEDULE_ENABLED`：WebUI/API/Desktop 长运行进程（包括 `python main.py --serve --schedule`）会在保存后按新值启动或停止 runtime scheduler；纯 CLI schedule 模式（`python main.py --schedule`）仍按启动时参数和配置运行。
+- `SCHEDULE_ENABLED`：WebUI/API/Desktop 长运行进程（包括 `python main.py --serve --schedule`）会在保存后按新值启动或停止 runtime scheduler；重启 `--serve-only` 或 Desktop 进程时也会恢复已启用的 daily jobs，但不会因此立即执行分析。纯 CLI schedule 模式（`python main.py --schedule`）仍按启动时参数和配置运行。
 - `SCHEDULE_TIME`、`SCHEDULE_TIMES`：不是重启必需项。`SCHEDULE_TIMES` 为空时使用 `SCHEDULE_TIME`；已运行的 scheduler 会按新时间重建 daily jobs。
 - `SCHEDULE_RUN_IMMEDIATELY`：schedule 模式启动行为，保存后不会让当前进程立即执行一次分析；手动执行请使用 runtime scheduler 的 run-now API。
 - runtime scheduler 的 run-now API 只会在没有分析任务运行时接受请求；如果已有分析在执行，会返回忙碌状态，Web 设置页会提示稍后重试。

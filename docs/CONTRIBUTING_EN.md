@@ -78,11 +78,14 @@ docs: update README deployment section
 
 After opening a PR, CI will automatically run the following PR checks:
 
+PRs that only change ordinary `docs/**`, non-governance Markdown, or `LICENSE` keep lightweight change detection, governance validation, and gate summarization, while skipping the three backend test shards, Docker, Web, and desktop packaging. Contract documentation, static API specifications, and Markdown fixtures read directly by offline tests still trigger backend tests. Governance assets such as `AGENTS.md`, `.github/instructions/**`, and `.claude/skills/**` are still validated by `ai-governance`; runtime-affecting text files such as configuration, dependency, and workflow files still run their corresponding full checks.
+
 | Check | Description | Required |
 |-------|-------------|:--------:|
 | `backend-gate` | `scripts/ci_gate.sh` — py_compile + flake8 critical errors + `./scripts/test.sh code` + `./scripts/test.sh yfinance` + offline pytest | ✅ |
 | `docker-build` | Docker image build and key module import smoke test | ✅ |
 | `web-gate` | `npm run lint` + `npm run build` (triggered when `apps/dsa-web/` changes) | ✅ (when triggered) |
+| `pr-review` | Automatic PR triggering is temporarily paused. Maintainers can still run it by PR number through `workflow_dispatch`; it reads PR metadata and diff through the GitHub API and never checks out or executes fork PR code. | ❌ (advisory) |
 
 Separately, the repository also has a non-blocking `network-smoke` workflow in `.github/workflows/network-smoke.yml`, but it is only triggered by `schedule` and `workflow_dispatch`, not by pull requests.
 

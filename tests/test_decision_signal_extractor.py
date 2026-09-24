@@ -147,6 +147,7 @@ def test_build_payload_maps_report_context_and_price_plan() -> None:
     assert payload["source_type"] == "analysis"
     assert payload["source_report_id"] == 88
     assert payload["trace_id"] == "trace-88"
+    assert payload["decision_profile"] == "balanced"
     assert payload["trigger_source"] == "api"
     assert payload["action"] == "buy"
     assert payload["confidence"] == 0.8
@@ -174,6 +175,52 @@ def test_build_payload_maps_report_context_and_price_plan() -> None:
         "minutes_to_close": 120,
     }
     assert payload["metadata"]["holding_state"] == "holding"
+
+
+def test_build_payload_adds_market_structure_metadata() -> None:
+    context_snapshot = {
+        "market_structure_context": {
+            "schema_version": "market-structure-v1",
+            "status": "partial",
+            "market": "cn",
+            "market_theme_context": {
+                "schema_version": "market-theme-v1",
+                "status": "partial",
+                "market": "cn",
+            },
+            "stock_market_position": {
+                "schema_version": "stock-market-position-v1",
+                "status": "partial",
+                "stock_code": "300024",
+                "market": "cn",
+                "primary_theme": {"name": "机器人概念"},
+                "theme_phase": "accelerating",
+                "stock_role": "follower",
+                "risk_tags": [{"code": "theme_data_partial", "message": "partial"}],
+            },
+        }
+    }
+
+    payload = build_decision_signal_payload_from_report(
+        _result(code="300024", name="机器人"),
+        context_snapshot=context_snapshot,
+        source_report_id=91,
+        trace_id="trace-market-structure",
+        query_source="api",
+        report_type="full",
+        profile_source=BUILD_PROFILE_SOURCE,
+    )
+
+    assert payload is not None
+    metadata = payload["metadata"]
+    assert metadata["market_structure_version"] == "market-structure-v1"
+    assert metadata["market_theme_version"] == "market-theme-v1"
+    assert metadata["stock_market_position_version"] == "stock-market-position-v1"
+    assert metadata["market_structure_status"] == "partial"
+    assert metadata["primary_theme"] == "机器人概念"
+    assert metadata["theme_phase"] == "accelerating"
+    assert metadata["stock_role"] == "follower"
+    assert metadata["market_structure_risk_tags"] == ["theme_data_partial"]
 
 
 def test_build_payload_uses_result_fallbacks_and_optional_catalysts() -> None:
@@ -208,6 +255,113 @@ def test_build_payload_uses_result_fallbacks_and_optional_catalysts() -> None:
     assert payload["trigger_source"] == "system"
     assert payload["confidence"] == 0.4
     assert payload["metadata"]["holding_state"] == "unknown"
+
+
+def test_build_payload_aligns_high_neutral_action_without_guardrail_to_buy() -> None:
+    result = _result(
+        sentiment_score=72,
+        operation_advice="持有",
+        decision_type="hold",
+        action=None,
+    )
+
+    payload = build_decision_signal_payload_from_report(
+        result,
+        trace_id="trace-high-neutral",
+        query_source="api",
+        report_type="simple",
+        profile_source=BUILD_PROFILE_SOURCE,
+    )
+
+    assert payload is not None
+    assert payload["action"] == "buy"
+    assert payload["action_label"] == "买入"
+    assert payload["metadata"]["raw_action"] == "hold"
+    assert payload["metadata"]["final_action"] == "buy"
+    assert payload["metadata"]["action_adjustment_reason"] == "canonical_score_alignment"
+    assert payload["metadata"]["score_scale"]["score_band"] == "60-79"
+
+
+def test_build_payload_keeps_high_neutral_action_with_guardrail_reason() -> None:
+    result = _result(
+        sentiment_score=72,
+        operation_advice="持有/观望待回踩",
+        decision_type="hold",
+        action=None,
+    )
+
+    payload = build_decision_signal_payload_from_report(
+        result,
+        trace_id="trace-high-neutral-guarded",
+        query_source="api",
+        report_type="simple",
+        profile_source=BUILD_PROFILE_SOURCE,
+    )
+
+    assert payload is not None
+    assert payload["action"] == "watch"
+    assert payload["action_label"] == "观望"
+    assert payload["metadata"]["raw_action"] == "watch"
+    assert payload["metadata"]["final_action"] == "watch"
+    assert payload["metadata"]["guardrail_reason"] == "持有/观望待回踩"
+
+
+def test_build_payload_uses_stability_calibration_raw_and_adjusted_scores() -> None:
+    result = _result(
+        sentiment_score=59,
+        operation_advice="观望",
+        decision_type="hold",
+        action=None,
+    )
+    dashboard = result.dashboard or {}
+    dashboard["decision_score_calibration"] = {
+        "raw_score": 72,
+        "adjusted_score": 59,
+        "final_action": "watch",
+        "guardrail_reason": "资金流较弱，按风险规则降级",
+    }
+    result.dashboard = dashboard
+
+    payload = build_decision_signal_payload_from_report(
+        result,
+        trace_id="trace-stability-calibration",
+        query_source="api",
+        report_type="simple",
+        profile_source=BUILD_PROFILE_SOURCE,
+    )
+
+    assert payload is not None
+    assert payload["score"] == 59
+    assert payload["metadata"]["raw_score"] == 72
+    assert payload["metadata"]["adjusted_score"] == 59
+    assert payload["metadata"]["score_scale"]["score_band"] == "40-59"
+    assert payload["metadata"]["raw_action"] == "watch"
+    assert payload["metadata"]["final_action"] == "watch"
+    assert payload["metadata"]["guardrail_reason"] == "资金流较弱，按风险规则降级"
+
+
+def test_build_payload_aligns_low_neutral_action_to_reduce() -> None:
+    result = _result(
+        sentiment_score=28,
+        operation_advice="观望",
+        decision_type="hold",
+        action=None,
+    )
+
+    payload = build_decision_signal_payload_from_report(
+        result,
+        trace_id="trace-low-neutral",
+        query_source="api",
+        report_type="simple",
+        profile_source=BUILD_PROFILE_SOURCE,
+    )
+
+    assert payload is not None
+    assert payload["action"] == "reduce"
+    assert payload["action_label"] == "减仓"
+    assert payload["metadata"]["raw_action"] == "watch"
+    assert payload["metadata"]["final_action"] == "reduce"
+    assert payload["metadata"]["score_scale"]["score_band"] == "20-39"
 
 
 def test_build_payload_records_empty_holding_state_from_explicit_portfolio_context() -> None:
@@ -374,6 +528,45 @@ def test_extract_and_persist_reuses_service_dedup_and_sanitization(isolated_db) 
     assert persisted["entry_high"] == 1700.0
 
 
+def test_extract_and_persist_reuses_stability_score_metadata(isolated_db) -> None:
+    service = DecisionSignalService(db_manager=isolated_db)
+    result = _result(
+        sentiment_score=59,
+        operation_advice="观望",
+        decision_type="hold",
+        action=None,
+        confidence_level="中",
+    )
+    dashboard = result.dashboard or {}
+    dashboard["decision_score_calibration"] = {
+        "raw_score": 72,
+        "adjusted_score": 59,
+        "final_action": "watch",
+        "guardrail_reason": "资金流较弱，按风险规则降级",
+    }
+    result.dashboard = dashboard
+
+    created = extract_and_persist_from_analysis_result(
+        result,
+        context_snapshot={"market_phase_summary": {"phase": "intraday"}},
+        portfolio_context={"quantity": 10},
+        source_report_id=903,
+        trace_id="trace-stability-persist",
+        query_source="api",
+        report_type="full",
+        profile_source="auto_default",
+        service=service,
+    )
+
+    assert created is not None
+    persisted = service.list_signals(source_report_id=903)["items"][0]
+    assert persisted["metadata"]["raw_score"] == 72
+    assert persisted["metadata"]["adjusted_score"] == 59
+    assert persisted["metadata"]["raw_action"] == "watch"
+    assert persisted["metadata"]["final_action"] == "watch"
+    assert persisted["metadata"]["guardrail_reason"] == "资金流较弱，按风险规则降级"
+
+
 def test_extract_and_persist_writes_tw_signal(isolated_db) -> None:
     """End-to-end write-leg guard: a tw analysis must PERSIST a DecisionSignal
     through create_signal -> _normalize_market -> DB, not merely build the payload.
@@ -431,3 +624,69 @@ def test_extract_and_persist_missing_price_plan_does_not_fabricate_fields(isolat
     assert item["entry_high"] is None
     assert item["stop_loss"] is None
     assert item["target_price"] is None
+
+
+def test_build_payload_index_uses_market_override_cn() -> None:
+    """V9 — an index target whose canonical code would resolve to None market
+    (e.g. CSI) must persist with market=cn via the market_override."""
+    result = _result(code="csi930955", name="红利低波100")
+
+    payload = build_decision_signal_payload_from_report(
+        result,
+        context_snapshot=None,
+        portfolio_context=None,
+        source_report_id=955,
+        trace_id="trace-index-csi",
+        query_source="cli",
+        report_type="full",
+        profile_source=BUILD_PROFILE_SOURCE,
+        market_override="cn",
+    )
+
+    assert payload is not None
+    assert payload["stock_code"] == "csi930955"
+    assert payload["stock_name"] == "红利低波100"
+    assert payload["market"] == "cn"
+    assert payload["source_type"] == "analysis"
+    assert payload["source_report_id"] == 955
+
+
+def test_extract_and_persist_index_signal_with_market_override(isolated_db) -> None:
+    """V9 — end-to-end: an index signal persists with market=cn, source_type,
+    and source_report_id linkage (not skipped because CSI market was None)."""
+    service = DecisionSignalService(db_manager=isolated_db)
+    result = _result(code="csi930955", name="红利低波100")
+
+    created = extract_and_persist_from_analysis_result(
+        result,
+        context_snapshot={"market_phase_summary": {"phase": "intraday"}},
+        portfolio_context={"quantity": 0},
+        source_report_id=955,
+        trace_id="trace-index-csi",
+        query_source="cli",
+        report_type="full",
+        profile_source="auto_default",
+        service=service,
+        market_override="cn",
+    )
+
+    assert created is not None
+    assert created["created"] is True
+    item = created["item"]
+    assert item["stock_code"] == "csi930955"
+    assert item["market"] == "cn"
+    assert item["source_type"] == "analysis"
+    assert item["source_report_id"] == 955
+
+    listed = service.list_signals(source_report_id=955)
+    assert listed["total"] == 1
+    assert listed["items"][0]["stock_code"] == "csi930955"
+    assert listed["items"][0]["market"] == "cn"
+
+    by_alias = service.list_signals(stock_code="930955.CSI", market="cn")
+    assert by_alias["total"] == 1
+    assert by_alias["items"][0]["stock_code"] == "csi930955"
+
+    latest = service.get_latest_active(stock_code="csi930955", market="cn")
+    assert latest["total"] == 1
+    assert latest["items"][0]["source_report_id"] == 955

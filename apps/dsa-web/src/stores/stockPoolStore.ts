@@ -5,7 +5,7 @@ import { getParsedApiError } from '../api/error';
 import { historyApi } from '../api/history';
 import type { AnalysisReport, HistoryItem, HistoryListResponse, ReportLanguage, StockBarItem, StockHistoryFilters, StockHistoryRange, TaskInfo } from '../types/analysis';
 import { getRecentStartDate, getTodayInShanghai } from '../utils/format';
-import { normalizeStockCode } from '../utils/stockCode';
+import { toAssetAwareCodeKey, type AssetAwareAssetType } from '../utils/stockCode';
 import { isObviouslyInvalidStockQuery, looksLikeStockCode, validateStockCode } from '../utils/validation';
 
 const PAGE_SIZE = 20;
@@ -20,6 +20,7 @@ type FetchHistoryOptions = {
   reset?: boolean;
   silent?: boolean;
   selectLatestForStockCode?: string;
+  selectLatestForStockAssetType?: AssetAwareAssetType | null;
 };
 
 type SubmitAnalysisOptions = {
@@ -43,6 +44,7 @@ let analyzeRequestSeq = 0;
 let historyRequestSeq = 0;
 let marketReviewHistoryRequestSeq = 0;
 let stockHistoryRequestSeq = 0;
+let stockBarRequestSeq = 0;
 let activeTaskRequestSeq = 0;
 let activeTaskLocalRevision = 0;
 let manualSelectionRequestSeq = 0;
@@ -87,6 +89,7 @@ export interface StockPoolState {
   markdownDrawerOpen: boolean;
   stockBarItems: StockBarItem[];
   isLoadingStockBar: boolean;
+  stockBarRefreshFailed: boolean;
   setQuery: (query: string) => void;
   clearError: () => void;
   clearInlineMessages: () => void;
@@ -163,6 +166,7 @@ const initialState = {
   markdownDrawerOpen: false,
   stockBarItems: [] as StockBarItem[],
   isLoadingStockBar: false,
+  stockBarRefreshFailed: false,
 };
 
 function buildHistoryParams(page: number) {
@@ -232,6 +236,7 @@ function reportToHistoryItem(report: AnalysisReport): HistoryItem | null {
     currentPrice: report.meta.currentPrice,
     changePct: report.meta.changePct,
     modelUsed: report.meta.modelUsed,
+    assetType: report.meta.assetType,
     createdAt: report.meta.createdAt,
   };
 }
@@ -249,17 +254,22 @@ function normalizeSelectedReport(report: AnalysisReport): AnalysisReport {
   };
 }
 
-function normalizeStockCodeKey(stockCode: string | undefined): string {
-  const trimmed = (stockCode ?? '').trim();
-  return trimmed ? normalizeStockCode(trimmed).toUpperCase() : '';
+function normalizeStockCodeKey(
+  stockCode: string | undefined,
+  assetType?: AssetAwareAssetType | null,
+): string {
+  return toAssetAwareCodeKey(stockCode, assetType);
 }
 
 function queueCompletedTaskSelection(
   stockCode: string | undefined,
   selectedReport: AnalysisReport | null,
+  assetType?: AssetAwareAssetType | null,
 ): void {
-  const key = normalizeStockCodeKey(stockCode);
+  const key = normalizeStockCodeKey(stockCode, assetType);
   if (key) {
+    // Matching only consumes the already-constructed identity key; the stored
+    // intent carries no assetType (it was only ever used to build the key).
     pendingCompletedTaskSelectionKeys.set(key, {
       manualSelectionSeq: manualSelectionRequestSeq,
       selectedReportId: selectedReport?.meta.id,
@@ -282,7 +292,10 @@ function consumeCompletedTaskSelection(items: HistoryItem[], selectedReport: Ana
   }
 
   if (selectedReport) {
-    const selectedStockCode = normalizeStockCodeKey(selectedReport.meta.stockCode);
+    const selectedStockCode = normalizeStockCodeKey(
+      selectedReport.meta.stockCode,
+      selectedReport.meta.assetType,
+    );
     const pendingSelectionIntent = selectedStockCode
       ? pendingCompletedTaskSelectionKeys.get(selectedStockCode)
       : undefined;
@@ -308,7 +321,7 @@ function consumeCompletedTaskSelection(items: HistoryItem[], selectedReport: Ana
     const latestItem = items.find(
       (item) =>
         item.reportType !== 'market_review' &&
-        normalizeStockCodeKey(item.stockCode) === selectedStockCode,
+        normalizeStockCodeKey(item.stockCode, item.assetType) === selectedStockCode,
     );
     if (latestItem) {
       pendingCompletedTaskSelectionKeys.delete(selectedStockCode);
@@ -320,7 +333,7 @@ function consumeCompletedTaskSelection(items: HistoryItem[], selectedReport: Ana
     if (item.reportType === 'market_review') {
       return false;
     }
-    const stockCode = normalizeStockCodeKey(item.stockCode);
+    const stockCode = normalizeStockCodeKey(item.stockCode, item.assetType);
     const pendingSelectionIntent = pendingCompletedTaskSelectionKeys.get(stockCode);
     return stockCode.length > 0 && pendingSelectionIntent?.manualSelectionSeq === manualSelectionRequestSeq;
   });
@@ -450,11 +463,16 @@ async function fetchHistory(
     reset = true,
     silent = false,
     selectLatestForStockCode,
+    selectLatestForStockAssetType,
   } = options;
   const currentState = get();
   const page = reset ? 1 : currentState.currentPage + 1;
   if (reset) {
-    queueCompletedTaskSelection(selectLatestForStockCode, currentState.selectedReport);
+    queueCompletedTaskSelection(
+      selectLatestForStockCode,
+      currentState.selectedReport,
+      selectLatestForStockAssetType,
+    );
   }
   const requestId = ++historyRequestSeq;
 
@@ -665,6 +683,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
       reset: true,
       silent: true,
       selectLatestForStockCode: task.reportType === 'market_review' ? undefined : task.stockCode,
+      selectLatestForStockAssetType: task.reportType === 'market_review' ? null : (task.assetType ?? null),
     });
   },
 
@@ -1038,6 +1057,7 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
     analyzeRequestSeq = 0;
     manualSelectionRequestSeq = 0;
     manualSelectionRequestId = 0;
+    stockBarRequestSeq += 1;
     activeTaskRequestSeq += 1;
     activeTaskLocalRevision += 1;
     dismissedTaskIds.clear();
@@ -1048,29 +1068,50 @@ export const useStockPoolStore = create<StockPoolState>((set, get) => ({
   loadStockBar: async () => {
     const state = get();
     if (state.isLoadingStockBar) return;
+    const requestSeq = ++stockBarRequestSeq;
     set({ isLoadingStockBar: true });
     try {
       const response = await historyApi.getStockBarList({
         startDate: getRecentStartDate(90),
         endDate: getTodayInShanghai(),
       });
-      set({ stockBarItems: response.items });
+      if (requestSeq !== stockBarRequestSeq) {
+        return;
+      }
+      set({ stockBarItems: response.items, stockBarRefreshFailed: false });
     } catch {
-      // keep existing items on error
+      if (requestSeq !== stockBarRequestSeq) {
+        return;
+      }
+      set({ stockBarRefreshFailed: true });
     } finally {
-      set({ isLoadingStockBar: false });
+      if (requestSeq === stockBarRequestSeq) {
+        set({ isLoadingStockBar: false });
+      }
     }
   },
 
   refreshStockBar: async () => {
+    const requestSeq = ++stockBarRequestSeq;
+    set({ isLoadingStockBar: true });
     try {
       const response = await historyApi.getStockBarList({
         startDate: getRecentStartDate(90),
         endDate: getTodayInShanghai(),
       });
-      set({ stockBarItems: response.items });
+      if (requestSeq !== stockBarRequestSeq) {
+        return;
+      }
+      set({ stockBarItems: response.items, stockBarRefreshFailed: false });
     } catch {
-      // keep existing items on error
+      if (requestSeq !== stockBarRequestSeq) {
+        return;
+      }
+      set({ stockBarRefreshFailed: true });
+    } finally {
+      if (requestSeq === stockBarRequestSeq) {
+        set({ isLoadingStockBar: false });
+      }
     }
   },
 }));

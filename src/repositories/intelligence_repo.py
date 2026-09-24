@@ -38,6 +38,17 @@ class IntelligenceRepository:
                 select(IntelligenceSource).where(IntelligenceSource.name == name).limit(1)
             ).scalar_one_or_none()
 
+    def update_source_enabled(self, source_id: int, enabled: bool) -> None:
+        with self.db.get_session() as session:
+            row = session.execute(
+                select(IntelligenceSource).where(IntelligenceSource.id == source_id).limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return
+            row.enabled = bool(enabled)
+            row.updated_at = datetime.now()
+            session.commit()
+
     def list_sources(
         self,
         *,
@@ -154,7 +165,11 @@ class IntelligenceRepository:
         if scope_type:
             conditions.append(IntelligenceItem.scope_type == scope_type)
         if scope_value:
-            conditions.append(IntelligenceItem.scope_value == self._normalize_scope_value(scope_value))
+            normalized_scope = self._normalize_scope_value(scope_value)
+            if scope_type == "symbol":
+                conditions.append(func.lower(IntelligenceItem.scope_value) == normalized_scope.lower())
+            else:
+                conditions.append(IntelligenceItem.scope_value == normalized_scope)
         if market:
             conditions.append(IntelligenceItem.market == market)
         if query:

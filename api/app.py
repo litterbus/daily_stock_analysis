@@ -19,6 +19,17 @@ import asyncio
 import json
 import logging
 import mimetypes
+
+import sys
+
+if sys.platform == "win32" and not mimetypes.inited:
+    _orig_read_windows_registry = getattr(mimetypes.MimeTypes, 'read_windows_registry', None)
+    if _orig_read_windows_registry is not None:
+        mimetypes.MimeTypes.read_windows_registry = lambda self, strict=True: None
+        try: mimetypes.init()
+        finally: mimetypes.MimeTypes.read_windows_registry = _orig_read_windows_registry
+    else:
+        mimetypes.init()
 import os
 import re
 from contextlib import asynccontextmanager, suppress
@@ -278,6 +289,11 @@ async def app_lifespan(app: FastAPI):
         runtime_scheduler=app.state.runtime_scheduler_service,
     )
     _schedule_stock_index_background_refresh(app, "startup")
+    # 名称解析器的 AkShare 缓存预热：命中磁盘缓存则零网络加载，否则发起
+    # 后台单飞拉取。把冷启动等待从首个用户请求挪到进程启动窗口。
+    from src.services.name_to_code_resolver import warmup_akshare_cache
+
+    warmup_akshare_cache()
     try:
         yield
     finally:
