@@ -458,7 +458,7 @@ jobs:
           MODE="${{ github.event.inputs.mode || 'full' }}"
           # push 触发（本机直连通道）：模式写在 local/.trigger 文件里
           if [ "${{ github.event_name }}" = "push" ]; then
-            MODE=$(tr -d '[:space:]' < local/.trigger 2>/dev/null || echo full)
+            MODE=$(head -n1 local/.trigger 2>/dev/null | tr -d '[:space:]' || echo full)
             case "$MODE" in
               stocks-only|market-only) ;;
               *) MODE="full" ;;
