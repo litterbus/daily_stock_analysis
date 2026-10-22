@@ -4,7 +4,13 @@ on:
   # 定时触发 - 每天北京时间 18:00 (UTC 10:00)
   schedule:
     - cron: '0 10 * * 1-5'     # 周一到周五，UTC 10:00 = 北京时间 18:00
-  
+
+  # 本机直连触发：推 local/.trigger（内容为 full / stocks-only / market-only）。
+  # 只认这个路径，不会误触其他 push 类 workflow（auto-tag 忽略 local/**）。
+  push:
+    branches: [main]
+    paths: ['local/.trigger']
+
   # 手动触发
   workflow_dispatch:
     inputs:
@@ -450,6 +456,15 @@ jobs:
 
           # 判断运行模式
           MODE="${{ github.event.inputs.mode || 'full' }}"
+          # push 触发（本机直连通道）：模式写在 local/.trigger 文件里
+          if [ "${{ github.event_name }}" = "push" ]; then
+            MODE=$(tr -d '[:space:]' < local/.trigger 2>/dev/null || echo full)
+            case "$MODE" in
+              stocks-only|market-only) ;;
+              *) MODE="full" ;;
+            esac
+            echo "📥 push 触发：local/.trigger = $MODE"
+          fi
           
           echo "=========================================="
           echo "🚀 A股自选股智能分析系统"
